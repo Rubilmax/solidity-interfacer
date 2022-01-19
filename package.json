@@ -1,0 +1,26 @@
+{
+  "name": "solidity-interfacer",
+  "description": "Automatically generates your Solidity contracts' interfaces",
+  "author": "Romain Milon <rmilon@gmail.com> (https://r.milon.pro)",
+  "version": "0.1.0",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@solidity-parser/parser": "^0.14.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rubilmax/solidity-interfacer.git"
+  },
+  "keywords": [
+    "solidity",
+    "interfaces",
+    "contracts"
+  ],
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rubilmax/solidity-interfacer/issues"
+  },
+  "homepage": "https://github.com/rubilmax/solidity-interfacer"
+}
