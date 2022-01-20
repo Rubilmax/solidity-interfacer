@@ -63,14 +63,14 @@ const loadContract = async (src) => {
 };
 
 const generateInterface = async (options) => {
-  const { src, modulesRoot, targetRoot } = options;
+  const { src, modulesRoot, targetRoot, stubsOnly = false } = options;
 
   if (src in lookUpContracts) return lookUpContracts[src];
 
   const { interfaceName, userDefinedTypeNames, children, pragma, contract, structs } =
     await loadContract(src);
 
-  if (!pragma || !contract || contract.kind !== 'contract') {
+  if (!pragma || !contract || !contract.kind.includes('contract')) {
     const stubs = '';
 
     lookUpContracts[src] = {
@@ -115,13 +115,6 @@ const generateInterface = async (options) => {
 
   const interfaceParameter = (param) =>
     getVariableTypeName(param.typeName) + (param.name ? ` ${param.name}` : '');
-
-  // generate a regular expression that matches any enum name that was defined in the contract
-  const enumNames = contract.subNodes
-    .filter((statement) => statement.type === 'EnumDefinition')
-    .map((en) => en.name);
-  const enumRegexp = new RegExp(enumNames.join('|'), 'g');
-  const replaceEnums = (str) => (enumNames.length ? str.replace(enumRegexp, 'uint') : str);
 
   // generate interface stubs for functions
   const functionStubs = contract.subNodes
@@ -197,6 +190,7 @@ const generateInterface = async (options) => {
       .map(async (statement) => {
         const interface = await generateInterface({
           ...options,
+          stubsOnly: true,
           src: statement.relPath,
         });
 
@@ -207,6 +201,10 @@ const generateInterface = async (options) => {
       }),
   );
   const validInheritedInterfaces = inheritedInterfaces.filter(({ interfaceName }) => interfaceName);
+
+  const inheritedStubs = validInheritedInterfaces
+    .filter(({ stubs }) => !!stubs)
+    .map(({ importName, stubs }) => `\n    // inherited from ${importName}\n${stubs}\n`);
 
   const importRoot = path.join(contractRoot, targetRoot);
   const importStubs = (
@@ -254,11 +252,24 @@ const generateInterface = async (options) => {
 
   const stubs = []
     .concat(
+      inheritedStubs,
       //structStubs, // temporary
       getterStubs,
       functionStubs,
     )
     .join('\n\n');
+
+  lookUpContracts[src] = {
+    interfaceName,
+    userDefinedTypeNames,
+    pragma,
+    contract,
+    children,
+    structs,
+    stubs,
+  };
+
+  if (stubsOnly) return lookUpContracts[src];
 
   const inheritanceStub = '';
   // validInheritedInterfaces.length > 0
@@ -279,16 +290,6 @@ ${stubs}
     `📦   Successfully generated interface for ${colors.bold(contract.name)} at:`,
     colors.underline(interfaceSrc),
   );
-
-  lookUpContracts[src] = {
-    interfaceName,
-    userDefinedTypeNames,
-    pragma,
-    contract,
-    children,
-    structs,
-    stubs,
-  };
 
   return lookUpContracts[src];
 };
