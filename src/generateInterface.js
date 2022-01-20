@@ -8,23 +8,34 @@ const toLookupObject = (obj, key) => {
   return obj;
 };
 
+const getGetterParamTypeNames = (typeName) => {
+  if (typeName.type !== 'Mapping') return [];
+
+  return [typeName.keyType.name].concat(getGetterParamTypeNames(typeName.valueType));
+};
+
+const getVariableTypeName = (typeName) => {
+  if (typeName.type !== 'Mapping') return typeName.name || typeName.namePath || typeName.type;
+
+  return getVariableTypeName(typeName.valueType);
+};
+
 const isUserDefinedTypeName = (variable) => variable.typeName.type === 'UserDefinedTypeName';
 
 const generateInterface = (options) => {
   const { src, modulesRoot, targetRoot, stubsOnly } = options;
 
-  console.log('🖨️  Interfacing:', src);
-
-  const contractRoot = path.dirname(src);
-
   const content = fs.readFileSync(src, 'utf-8');
   const ast = parser.parse(content);
+
+  const contract = ast.children.find((statement) => statement.type === 'ContractDefinition');
+  if (!contract) throw Error('🟥 No contract definition found!');
+  if (contract.kind === 'interface') return '';
 
   const pragma = ast.children.find((statement) => statement.type === 'PragmaDirective');
   if (!pragma) throw Error('🟥 No pragma found!');
 
-  const contract = ast.children.find((statement) => statement.type === 'ContractDefinition');
-  if (!contract) throw Error('🟥 No contract definition found!');
+  console.log('🖨️  Interfacing:', src);
 
   const supers = contract.baseContracts
     .map((supercontract) => supercontract.baseName.namePath)
@@ -35,12 +46,10 @@ const generateInterface = (options) => {
   const interfaceParameter = (param) => {
     if (isUserDefinedTypeName(param)) userDefinedTypeNames.push(param.typeName.namePath);
 
-    return (
-      (param.typeName.name || param.typeName.namePath || param.typeName.type) +
-      (param.name ? ` ${param.name}` : '')
-    );
+    return getVariableTypeName(param.typeName) + (param.name ? ` ${param.name}` : '');
   };
 
+  const contractRoot = path.dirname(src);
   const imports = ast.children
     .filter((statement) => statement.type === 'ImportDirective')
     .map((statement) => {
@@ -61,7 +70,7 @@ const generateInterface = (options) => {
 
       if (!exists)
         console.log(
-          `🟥 Contract ${contract.name} was trying to import ${statement.path} not found in ${statement.importDir}: interfaces may not be complete!`,
+          `🟥 Contract ${contract.name} was trying to import ${statement.path} not found in ${statement.importDir}: generated interfaces may not be complete!`,
         );
 
       return exists;
@@ -129,12 +138,8 @@ const generateInterface = (options) => {
 
       if (isUserDefinedTypeName(getter)) userDefinedTypeNames.push(getter.typeName.namePath);
 
-      const paramType = getter.typeName.type === 'Mapping' ? getter.typeName.keyType.name : '';
-
-      const returnType =
-        getter.typeName.type === 'Mapping'
-          ? getter.typeName.valueType.name
-          : getter.typeName.namePath || getter.typeName.type;
+      const paramType = getGetterParamTypeNames(getter.typeName).join(', ');
+      const returnType = getVariableTypeName(getter.typeName);
 
       return `    function ${getter.name}(${paramType}) external view returns (${returnType});`;
     });
