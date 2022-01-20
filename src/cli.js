@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
 var assert = require('assert');
 const glob = require('glob');
 
@@ -44,24 +42,10 @@ const optionDefinitions = [
 
 const options = commandLineArgs(optionDefinitions);
 
-const generateInterfaces = async (src) => {
-  const contractPaths = await Promise.all(options.src.map(glob)).then((globs) =>
-    globs.map(({ pattern }) => pattern),
-  );
+const generateInterfaces = async () => {
+  const contractPaths = options.src.flatMap((src) => glob.sync(src));
 
-  return Promise.all(
-    contractPaths.map((contractPath) => {
-      const contractName = path.basename(contractPath, '.sol');
-      const interfaceSrc = path.join(
-        path.dirname(contractPath),
-        options.targetRoot,
-        `I${contractName}.sol`,
-      );
-      fs.writeFileSync(interfaceSrc, generateInterface({ ...options, src: contractPath }));
-
-      console.log(`📦  Interfaces for ${contractName} successfully generated at:`, interfaceSrc);
-    }),
-  );
+  return Promise.all(contractPaths.map((src) => generateInterface({ ...options, src })));
 };
 
 if (options.help) {
@@ -83,5 +67,5 @@ if (options.help) {
 } else {
   assert(options.src, '🟥 No source file specified!');
 
-  generateInterfaces(options.src);
+  generateInterfaces();
 }

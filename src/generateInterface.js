@@ -1,90 +1,120 @@
 const fs = require('fs');
 const path = require('path');
+const colors = require('colors/safe');
 
 const parser = require('@solidity-parser/parser');
 
-const toLookupObject = (obj, key) => {
-  obj[key] = 1;
-  return obj;
+const isUserDefinedTypeName = (typeName) => typeName.type === 'UserDefinedTypeName';
+
+const lookUpContracts = {};
+
+const loadContract = async (src) => {
+  if (!(src in lookUpContracts)) {
+    const exists = fs.existsSync(src);
+
+    if (!exists) {
+      console.log(
+        colors.brightRed(
+          `🟥 Trying to import file not found at ${colors.underline(
+            src,
+          )}: generated interfaces may not be complete!`,
+        ),
+      );
+
+      lookUpContracts[src] = {
+        interfaceName: '',
+        userDefinedTypeNames: [],
+        children: [],
+        pragma: null,
+        contract: null,
+        structs: [],
+      };
+
+      return lookUpContracts[src];
+    }
+
+    const content = fs.readFileSync(src, 'utf-8');
+    const { children } = parser.parse(content);
+
+    const pragma = children.find((statement) => statement.type === 'PragmaDirective');
+    if (!pragma) throw Error(`🟥 No pragma found at ${src}`);
+
+    const contract = children.find((statement) => statement.type === 'ContractDefinition');
+    if (!contract) throw Error(`🟥 No contract definition found at ${src}`);
+
+    const interfaceName = contract
+      ? (contract.kind !== 'interface' ? 'I' : '') + contract.name
+      : '';
+
+    const structs = contract.subNodes.filter((statement) => statement.type === 'StructDefinition');
+    const userDefinedTypeNames = [contract.name].concat(structs.map(({ name }) => name));
+
+    lookUpContracts[src] = {
+      interfaceName,
+      userDefinedTypeNames,
+      children,
+      pragma,
+      contract,
+      structs,
+    };
+  }
+
+  return lookUpContracts[src];
 };
 
-const getGetterParamTypeNames = (typeName) => {
-  if (typeName.type !== 'Mapping') return [];
+const generateInterface = async (options) => {
+  const { src, modulesRoot, targetRoot } = options;
 
-  return [typeName.keyType.name].concat(getGetterParamTypeNames(typeName.valueType));
-};
+  if (src in lookUpContracts) return lookUpContracts[src];
 
-const getVariableTypeName = (typeName) => {
-  if (typeName.type !== 'Mapping') return typeName.name || typeName.namePath || typeName.type;
+  const { interfaceName, userDefinedTypeNames, children, pragma, contract, structs } =
+    await loadContract(src);
 
-  return getVariableTypeName(typeName.valueType);
-};
+  if (!pragma || !contract || contract.kind !== 'contract') {
+    const stubs = '';
 
-const isUserDefinedTypeName = (variable) => variable.typeName.type === 'UserDefinedTypeName';
+    lookUpContracts[src] = {
+      interfaceName,
+      userDefinedTypeNames,
+      pragma,
+      contract,
+      children,
+      structs,
+      stubs,
+    };
 
-const generateInterface = (options) => {
-  const { src, modulesRoot, targetRoot, stubsOnly } = options;
+    return lookUpContracts[src];
+  }
 
-  const content = fs.readFileSync(src, 'utf-8');
-  const ast = parser.parse(content);
+  console.log(colors.yellow(`🖨️  Interfacing: ${colors.underline(src)}`));
 
-  const contract = ast.children.find((statement) => statement.type === 'ContractDefinition');
-  if (!contract) throw Error('🟥 No contract definition found!');
-  if (contract.kind === 'interface') return '';
+  const parents = contract.baseContracts.map((supercontract) => supercontract.baseName.namePath);
 
-  const pragma = ast.children.find((statement) => statement.type === 'PragmaDirective');
-  if (!pragma) throw Error('🟥 No pragma found!');
+  const usedUserDefinedTypeNames = [];
 
-  console.log('🖨️  Interfacing:', src);
+  const getVariableTypeName = (typeName) => {
+    if (isUserDefinedTypeName(typeName) && !usedUserDefinedTypeNames.includes(typeName.namePath))
+      usedUserDefinedTypeNames.push(typeName.namePath);
 
-  const supers = contract.baseContracts
-    .map((supercontract) => supercontract.baseName.namePath)
-    .reduce(toLookupObject, {});
+    if (isUserDefinedTypeName(typeName)) return ''; // ! temporary
 
-  const userDefinedTypeNames = [];
+    if (typeName.type === 'ArrayTypeName')
+      return getVariableTypeName(typeName.baseTypeName) + '[] memory';
+    if (typeName.type !== 'Mapping') return typeName.name || typeName.namePath || typeName.type;
 
-  const interfaceParameter = (param) => {
-    if (isUserDefinedTypeName(param)) userDefinedTypeNames.push(param.typeName.namePath);
-
-    return getVariableTypeName(param.typeName) + (param.name ? ` ${param.name}` : '');
+    return getVariableTypeName(typeName.valueType);
   };
 
-  const contractRoot = path.dirname(src);
-  const imports = ast.children
-    .filter((statement) => statement.type === 'ImportDirective')
-    .map((statement) => {
-      const importDir = statement.path.startsWith('.') ? contractRoot : modulesRoot;
+  const getGetterParamTypeNames = (typeName) => {
+    if (typeName.type !== 'Mapping') return [];
 
-      return {
-        ...statement,
-        importName: path.basename(statement.path, '.sol'),
-        importDir,
-        relPath: path.join(importDir, statement.path),
-      };
-    });
+    return [getVariableTypeName(typeName.keyType)].concat(
+      getGetterParamTypeNames(typeName.valueType),
+    );
+  };
 
-  const inheritedStubs = imports
-    .filter((statement) => statement.importName in supers)
-    .filter((statement) => {
-      const exists = fs.existsSync(statement.relPath);
-
-      if (!exists)
-        console.log(
-          `🟥 Contract ${contract.name} was trying to import ${statement.path} not found in ${statement.importDir}: generated interfaces may not be complete!`,
-        );
-
-      return exists;
-    })
-    .map((statement) => ({
-      ...statement,
-      stubs: generateInterface({
-        ...options,
-        stubsOnly: true,
-        src: statement.relPath,
-      }),
-    }))
-    .filter(({ stubs }) => !!stubs)
-    .map(({ importName, stubs }) => `\n    // inherited from ${importName}\n${stubs}\n`);
+  const interfaceParameter = (param) =>
+    getVariableTypeName(param.typeName) + (param.name ? ` ${param.name}` : '');
 
   // generate a regular expression that matches any enum name that was defined in the contract
   const enumNames = contract.subNodes
@@ -100,8 +130,10 @@ const generateInterface = (options) => {
         statement.type === 'FunctionDefinition' &&
         !!statement.name && // fallback function does not have a name
         ['external', 'public', 'default'].includes(statement.visibility) &&
-        (!statement.modifiers ||
-          statement.modifiers.every((mod) => mod.name !== 'private' && mod.name !== 'internal')),
+        (!statement.parameters ||
+          !statement.parameters.some((param) => isUserDefinedTypeName(param.typeName))) && // ! temporary
+        (!statement.returnParameters ||
+          !statement.returnParameters.some((param) => isUserDefinedTypeName(param.typeName))),
     )
     .map((f) => {
       const parameters = f.parameters.map(interfaceParameter).join(', ');
@@ -134,32 +166,131 @@ const generateInterface = (options) => {
         statement.variables[0].visibility === 'public',
     )
     .map((statement) => {
-      const getter = statement.variables[0];
+      const { name, typeName } = statement.variables[0];
 
-      if (isUserDefinedTypeName(getter)) userDefinedTypeNames.push(getter.typeName.namePath);
+      const paramTypeNames = getGetterParamTypeNames(typeName).filter(Boolean).join(', ');
+      const returnTypeName = getVariableTypeName(typeName);
 
-      const paramType = getGetterParamTypeNames(getter.typeName).join(', ');
-      const returnType = getVariableTypeName(getter.typeName);
+      if (!paramTypeNames || !returnTypeName) return ''; // ! temporary
 
-      return `    function ${getter.name}(${paramType}) external view returns (${returnType});`;
+      return `    function ${name}(${paramTypeNames}) external view returns (${returnTypeName});`;
+    })
+    .filter(Boolean);
+
+  const contractRoot = path.dirname(src);
+  const imports = children
+    .filter((statement) => statement.type === 'ImportDirective')
+    .map((statement) => {
+      const importDir = statement.path.startsWith('.') ? contractRoot : modulesRoot;
+
+      return {
+        ...statement,
+        importName: path.basename(statement.path, '.sol'),
+        importDir,
+        relPath: path.join(importDir, statement.path),
+      };
     });
 
+  const inheritedInterfaces = await Promise.all(
+    imports
+      .filter(({ importName }) => parents.includes(importName) && interfaceName !== importName)
+      .map(async (statement) => {
+        const interface = await generateInterface({
+          ...options,
+          src: statement.relPath,
+        });
+
+        return {
+          ...statement,
+          ...interface,
+        };
+      }),
+  );
+  const validInheritedInterfaces = inheritedInterfaces.filter(({ interfaceName }) => interfaceName);
+
   const importRoot = path.join(contractRoot, targetRoot);
-  const importStubs = imports
-    .filter(({ importName }) => userDefinedTypeNames.includes(importName))
-    .map(({ relPath }) => `import "${relPath.replace(importRoot, '.')}";`);
+  const importStubs = (
+    await Promise.all(
+      imports.map(async ({ relPath }) => {
+        const { userDefinedTypeNames } = await loadContract(relPath);
 
-  const stubs = [].concat(inheritedStubs, getterStubs, functionStubs).join('\n\n');
-  if (stubsOnly) return stubs;
+        const isUsed = userDefinedTypeNames.some((userDefinedTypeName) =>
+          usedUserDefinedTypeNames.includes(userDefinedTypeName),
+        );
 
-  return `// SPDX-License-Identifier: UNLICENSED
+        return { relPath, isUsed };
+      }),
+    )
+  )
+    .filter(({ isUsed }) => isUsed)
+    // .concat(
+    //   validInheritedInterfaces.map(({ relPath, interfaceName }) => ({
+    //     relPath: path
+    //       .join(path.dirname(relPath), targetRoot, `${interfaceName}.sol`)
+    //       .replace(importRoot, '.'),
+    //   })),
+    // )
+    .map(({ relPath }) => `import "${relPath.replace(importRoot, '.')}";\n`)
+    .join('');
+
+  const importedUserDefinedTypeNames = inheritedInterfaces.flatMap(
+    ({ userDefinedTypeNames }) => userDefinedTypeNames,
+  );
+
+  const newUserDefinedTypeNames = usedUserDefinedTypeNames.filter(
+    (userDefinedTypeName) => !importedUserDefinedTypeNames.includes(userDefinedTypeName),
+  );
+
+  // generate interface stubs for public structs
+  const structStubs = structs
+    .filter((statement) => newUserDefinedTypeNames.includes(statement.name))
+    .map((statement) => {
+      const structMembers = statement.members
+        .map((structMember) => `        ${interfaceParameter(structMember)};`)
+        .join('\n');
+
+      return `    struct ${statement.name} {\n${structMembers}\n    }`;
+    });
+
+  const stubs = []
+    .concat(
+      //structStubs, // temporary
+      getterStubs,
+      functionStubs,
+    )
+    .join('\n\n');
+
+  const inheritanceStub = '';
+  // validInheritedInterfaces.length > 0
+  //   ? ' is ' + validInheritedInterfaces.map(({ interfaceName }) => interfaceName).join(', ')
+  //   : ''; // ! temporary
+
+  const interface = `// SPDX-License-Identifier: UNLICENSED
 pragma ${pragma.name} ${pragma.value};
-
-${importStubs.join('\n')}
-
-interface I${contract.name} {
+${importStubs.length > 0 ? '\n' : ''}${importStubs}
+interface ${interfaceName}${inheritanceStub} {
 ${stubs}
 }`;
+
+  const interfaceSrc = path.join(importRoot, `${interfaceName}.sol`);
+  await fs.writeFileSync(interfaceSrc, interface);
+
+  console.log(
+    `📦   Successfully generated interface for ${colors.bold(contract.name)} at:`,
+    colors.underline(interfaceSrc),
+  );
+
+  lookUpContracts[src] = {
+    interfaceName,
+    userDefinedTypeNames,
+    pragma,
+    contract,
+    children,
+    structs,
+    stubs,
+  };
+
+  return lookUpContracts[src];
 };
 
 module.exports = generateInterface;
