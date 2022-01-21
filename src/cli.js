@@ -41,13 +41,14 @@ const optionDefinitions = [
   },
   {
     name: 'license',
+    alias: 'l',
     type: String,
     description: "The SPDX license's identifier added to the start of each generated interface.",
     defaultValue: 'UNLICENSED',
   },
   {
     name: 'logFiles',
-    alias: 'log',
+    alias: 's',
     type: Boolean,
     description: 'Restrict logging to generated interfaces file paths only.',
     defaultValue: false,
