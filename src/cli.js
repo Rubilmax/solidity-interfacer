@@ -49,7 +49,9 @@ const optionDefinitions = [
 const options = commandLineArgs(optionDefinitions);
 
 const generateInterfaces = async () => {
-  const contractPaths = options.src.flatMap((src) => glob.sync(src));
+  const contractPaths = options.src
+    .flatMap((src) => glob.sync(src))
+    .filter((path) => path.endsWith('.sol'));
 
   return Promise.all(contractPaths.map((src) => generateInterface({ ...options, src })));
 };
@@ -70,8 +72,4 @@ if (options.help) {
       },
     ]),
   );
-} else {
-  assert(options.src, '🟥 No source file specified!');
-
-  generateInterfaces();
-}
+} else generateInterfaces();
