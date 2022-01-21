@@ -22,6 +22,7 @@ const optionDefinitions = [
       'The relative paths to input contracts to generate interfaces for. Can be relative globs.',
     typeLabel: '<files>',
     defaultOption: true,
+    defaultValue: [],
   },
   {
     name: 'modulesRoot',
