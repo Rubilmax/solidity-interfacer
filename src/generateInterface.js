@@ -8,18 +8,19 @@ const isUserDefinedTypeName = (typeName) => typeName.type === 'UserDefinedTypeNa
 
 const lookUpContracts = {};
 
-const loadContract = async (src) => {
+const loadContract = async (src, logFiles) => {
   if (!(src in lookUpContracts)) {
     const exists = fs.existsSync(src);
 
     if (!exists) {
-      console.log(
-        colors.brightRed(
-          `🟥 Trying to import file not found at ${colors.underline(
-            src,
-          )}: generated interfaces may not be complete!`,
-        ),
-      );
+      if (!logFiles)
+        console.log(
+          colors.brightRed(
+            `🟥 Trying to import file not found at ${colors.underline(
+              src,
+            )}: generated interfaces may not be complete!`,
+          ),
+        );
 
       lookUpContracts[src] = {
         interfaceName: '',
@@ -63,12 +64,12 @@ const loadContract = async (src) => {
 };
 
 const generateInterface = async (options) => {
-  const { src, modulesRoot, targetRoot, license, stubsOnly = false } = options;
+  const { src, modulesRoot, targetRoot, license, logFiles, stubsOnly = false } = options;
 
   if (src in lookUpContracts) return lookUpContracts[src];
 
   const { interfaceName, userDefinedTypeNames, children, pragma, contract, structs } =
-    await loadContract(src);
+    await loadContract(src, logFiles);
 
   if (!pragma || !contract || !contract.kind.includes('contract')) {
     const stubs = '';
@@ -86,7 +87,7 @@ const generateInterface = async (options) => {
     return lookUpContracts[src];
   }
 
-  console.log(colors.yellow(`🖨️  Interfacing: ${colors.underline(src)}`));
+  if (!logFiles) console.log(colors.yellow(`🖨️  Interfacing: ${colors.underline(src)}`));
 
   const parents = contract.baseContracts.map((supercontract) => supercontract.baseName.namePath);
 
@@ -210,7 +211,7 @@ const generateInterface = async (options) => {
   const importStubs = (
     await Promise.all(
       imports.map(async ({ relPath }) => {
-        const { userDefinedTypeNames } = await loadContract(relPath);
+        const { userDefinedTypeNames } = await loadContract(relPath, logFiles);
 
         const isUsed = userDefinedTypeNames.some((userDefinedTypeName) =>
           usedUserDefinedTypeNames.includes(userDefinedTypeName),
@@ -286,10 +287,12 @@ ${stubs}
   const interfaceSrc = path.join(importRoot, `${interfaceName}.sol`);
   await fs.writeFileSync(interfaceSrc, interface);
 
-  console.log(
-    `📦   Successfully generated interface for ${colors.bold(contract.name)} at:`,
-    colors.underline(interfaceSrc),
-  );
+  if (!logFiles)
+    console.log(
+      `📦   Successfully generated interface for ${colors.bold(contract.name)} at:`,
+      colors.underline(interfaceSrc),
+    );
+  else console.log(interfaceSrc);
 
   return lookUpContracts[src];
 };

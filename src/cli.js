@@ -45,6 +45,13 @@ const optionDefinitions = [
     description: "The SPDX license's identifier added to the start of each generated interface.",
     defaultValue: 'UNLICENSED',
   },
+  {
+    name: 'logFiles',
+    alias: 'log',
+    type: Boolean,
+    description: 'Restrict logging to generated interfaces file paths only.',
+    defaultValue: false,
+  },
 ];
 
 const options = commandLineArgs(optionDefinitions);
