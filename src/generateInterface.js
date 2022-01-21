@@ -63,7 +63,7 @@ const loadContract = async (src) => {
 };
 
 const generateInterface = async (options) => {
-  const { src, modulesRoot, targetRoot, stubsOnly = false } = options;
+  const { src, modulesRoot, targetRoot, license, stubsOnly = false } = options;
 
   if (src in lookUpContracts) return lookUpContracts[src];
 
@@ -276,7 +276,7 @@ const generateInterface = async (options) => {
   //   ? ' is ' + validInheritedInterfaces.map(({ interfaceName }) => interfaceName).join(', ')
   //   : ''; // ! temporary
 
-  const interface = `// SPDX-License-Identifier: UNLICENSED
+  const interface = `// SPDX-License-Identifier: ${license}
 pragma ${pragma.name} ${pragma.value};
 ${importStubs.length > 0 ? '\n' : ''}${importStubs}
 interface ${interfaceName}${inheritanceStub} {

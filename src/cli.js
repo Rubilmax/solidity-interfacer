@@ -38,6 +38,12 @@ const optionDefinitions = [
     typeLabel: '<path>',
     defaultValue: 'interfaces',
   },
+  {
+    name: 'license',
+    type: String,
+    description: "The SPDX license's identifier added to the start of each generated interface.",
+    defaultValue: 'UNLICENSED',
+  },
 ];
 
 const options = commandLineArgs(optionDefinitions);
