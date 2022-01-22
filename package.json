@@ -24,5 +24,8 @@
   "bugs": {
     "url": "https://github.com/rubilmax/solidity-interfacer/issues"
   },
-  "homepage": "https://github.com/rubilmax/solidity-interfacer"
+  "homepage": "https://github.com/rubilmax/solidity-interfacer",
+  "devDependencies": {
+    "@openzeppelin/contracts": "^4.4.2"
+  }
 }
