@@ -76,7 +76,7 @@ const loadContract = async (options) => {
 };
 
 const generateInterface = async (options) => {
-  const { src, modulesRoot, targetRoot, license, logFiles } = options;
+  const { src, modulesRoot, targetRoot, license, logFiles, onlyRawTypes } = options;
 
   if (src in lookUpContracts && lookUpContracts[src].interfaceSrc) return lookUpContracts[src];
 
@@ -107,20 +107,22 @@ const generateInterface = async (options) => {
 
   const usedUserDefinedTypeNames = [].concat(parents);
 
-  const getVariableTypeName = (typeName, addDataLocation = false) => {
-    const dataLocation = addDataLocation ? ' memory' : '';
-
+  const getVariableTypeName = (typeName, dataLocation = '') => {
     if (isUserDefinedTypeName(typeName)) {
+      if (onlyRawTypes) return ''; // not registering the unwanted user-defined type as used
+
       if (!usedUserDefinedTypeNames.includes(typeName.namePath))
         usedUserDefinedTypeNames.push(typeName.namePath);
 
-      return typeName.namePath + (structTypeNames.includes(typeName.namePath) ? dataLocation : '');
+      if (structTypeNames.includes(typeName.namePath) && !dataLocation) dataLocation = 'memory';
+
+      return typeName.namePath + (!!dataLocation ? ` ${dataLocation}` : '');
     }
 
+    if (typeName.name === 'string') return `string ${dataLocation || 'memory'}`;
     if (typeName.type === 'ArrayTypeName')
-      return getVariableTypeName(typeName.baseTypeName, false) + '[]' + dataLocation;
-    if (typeName.type === 'Mapping')
-      return getVariableTypeName(typeName.valueType, addDataLocation); // ! we don't always want get the value type... (e.g. in the case of a mapping type returned from a function)
+      return getVariableTypeName(typeName.baseTypeName) + `[] ${dataLocation || 'memory'}`;
+    if (typeName.type === 'Mapping') return getVariableTypeName(typeName.valueType); // ! we don't always want the value type... (e.g. in the case of a mapping type returned from a function)
 
     return typeName.name || typeName.type;
   };
@@ -133,8 +135,12 @@ const generateInterface = async (options) => {
     );
   };
 
-  const interfaceParameter = (param) =>
-    getVariableTypeName(param.typeName) + (param.name ? ` ${param.name}` : '');
+  const interfaceParameter = (param) => {
+    const typeName = getVariableTypeName(param.typeName, param.storageLocation);
+    if (!typeName) return '';
+
+    return typeName + (param.name ? ` ${param.name}` : '');
+  };
 
   // 1. generate stubs for functions
   const functionStubs = contract.subNodes
@@ -145,13 +151,16 @@ const generateInterface = async (options) => {
         !!statement.name, // fallback function does not have a name,
     )
     .map((f) => {
-      const parameters = f.parameters.map(interfaceParameter).join(', ');
-      const returnParameters = f.returnParameters
-        ? f.returnParameters.map(interfaceParameter).join(', ')
-        : '';
+      const parameters = f.parameters.map(interfaceParameter);
+      const returnParameters = f.returnParameters ? f.returnParameters.map(interfaceParameter) : [];
 
-      const returns = `${returnParameters ? ` returns (${returnParameters})` : ''}`;
+      if (parameters.includes('') || returnParameters.includes('')) return ''; // an unwanted user-defined type was used
 
+      const returns = `${
+        returnParameters.length > 0 ? ` returns (${returnParameters.join(', ')})` : ''
+      }`;
+
+      // ! need to implement Enum stubs
       // get privacy and other non-custom modifiers
       //   const notModifiers = f.notModifiers.length
       //     ? // replace enums in returns with uint
@@ -163,8 +172,9 @@ const generateInterface = async (options) => {
       //         .join(" ")
       //     : "";
 
-      return `    function ${f.name}(${parameters}) external${returns};`;
-    });
+      return `    function ${f.name}(${parameters.join(', ')}) external${returns};`;
+    })
+    .filter(Boolean); // filtering out empty stubs because of unwanted user-defined types
 
   // 2. generate stubs for public variable getters
   const getterStubs = contract.subNodes
@@ -175,13 +185,18 @@ const generateInterface = async (options) => {
         statement.variables[0].visibility === 'public',
     )
     .map((statement) => {
-      const { name, typeName } = statement.variables[0];
+      const { name, typeName, storageLocation } = statement.variables[0];
 
-      const paramTypeNames = getGetterParamTypeNames(typeName).join(', ');
-      const returnTypeName = getVariableTypeName(typeName, true);
+      const paramTypeNames = getGetterParamTypeNames(typeName);
+      const returnTypeName = getVariableTypeName(typeName, storageLocation);
 
-      return `    function ${name}(${paramTypeNames}) external view returns (${returnTypeName});`;
-    });
+      if (paramTypeNames.includes('') || !returnTypeName) return ''; // an unwanted user-defined type was used
+
+      return `    function ${name}(${paramTypeNames.join(
+        ', ',
+      )}) external view returns (${returnTypeName});`;
+    })
+    .filter(Boolean); // filtering out empty stubs because of unwanted user-defined types
 
   // 3. generate stubs for imported contracts
   const contractRoot = path.dirname(src);
@@ -254,7 +269,9 @@ const generateInterface = async (options) => {
       return `    struct ${statement.name} {\n${structMembers}\n    }`;
     });
 
-  const stubs = [].concat(structStubs, getterStubs, functionStubs).join('\n\n');
+  const stubs = []
+    .concat(!onlyRawTypes ? structStubs : [], getterStubs, functionStubs)
+    .join('\n\n');
 
   const interface = `// SPDX-License-Identifier: ${license}
 pragma ${pragma.name} ${pragma.value};

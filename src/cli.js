@@ -53,6 +53,12 @@ const optionDefinitions = [
     description: 'Restrict logging to generated interfaces file paths only.',
     defaultValue: false,
   },
+  {
+    name: 'onlyRawTypes',
+    type: Boolean,
+    description: 'Restrict interfaces to those containing Solidity primitives only.',
+    defaultValue: false,
+  },
 ];
 
 const options = commandLineArgs(optionDefinitions);
