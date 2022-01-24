@@ -31,6 +31,7 @@ const loadFakeContract = (src, logFiles) => {
     contract: null,
     structs: [],
     structTypeNames: [],
+    comments: [],
   };
 
   return lookUpContracts[src];
@@ -46,10 +47,13 @@ const loadContract = async (options) => {
     const content = fs.readFileSync(src, 'utf-8');
     const { children } = parser.parse(content);
 
-    const licenses = content
-      .split('\n')
-      .filter((line) => line.replace(/^\s+|\s+$/g, '').startsWith('//'))
-      .flatMap((line) => line.match(/(?<=SPDX-License-Identifier: ).+/));
+    const lines = content.split('\n');
+
+    const pragmaLineIndex = lines.findIndex((line) => line.includes('pragma'));
+    const comments = lines
+      .slice(0, Math.max(0, pragmaLineIndex))
+      .map((line) => line.replace(/^\s+|\s+$/g, ''))
+      .filter((line) => line.startsWith('//'));
 
     const pragma = children.find(isStatement(STATEMENT_TYPE.PRAGMA_DIRECTIVE));
     if (!pragma) throw Error(`🟥 No pragma found at ${src}`);
@@ -74,7 +78,7 @@ const loadContract = async (options) => {
       userDefinedTypeNames,
       structs,
       structTypeNames,
-      license: options.license || licenses[0] || 'UNLICENSED',
+      comments,
     };
   }
 
@@ -82,7 +86,10 @@ const loadContract = async (options) => {
 };
 
 const generateInterface = async (options) => {
-  const { src, modulesRoot, targetRoot, logFiles, onlyRawTypes } = options;
+  const { src, modulesRoot, logFiles, onlyRawTypes } = options;
+
+  const srcRoot = path.dirname(src);
+  const targetRoot = options.targetRoot || path.join(srcRoot, 'interfaces');
 
   if (src in lookUpContracts && lookUpContracts[src].interfaceSrc) return lookUpContracts[src];
 
@@ -94,13 +101,18 @@ const generateInterface = async (options) => {
     userDefinedTypeNames,
     structs,
     structTypeNames,
-    license,
+    comments,
   } = await loadContract(options);
 
+  const isModule = src.startsWith(modulesRoot);
   const interfaceSrc =
     contract.kind === 'interface'
       ? src
-      : path.join(path.dirname(src), targetRoot, `${interfaceName}.sol`);
+      : path.join(
+          targetRoot,
+          isModule ? `dependencies/${src.split('/')[1]}` : '',
+          `${interfaceName}.sol`,
+        );
   Object.assign(lookUpContracts[src], { interfaceSrc });
 
   if (!pragma || !contract || contract.kind === 'interface' || contract.kind === 'library')
@@ -206,10 +218,9 @@ const generateInterface = async (options) => {
     .filter(Boolean); // filtering out empty stubs because of unwanted user-defined types
 
   // 3. generate stubs for imported contracts
-  const contractRoot = path.dirname(src);
   const imports = await Promise.all(
     children.filter(isStatement(STATEMENT_TYPE.IMPORT_DIRECTIVE)).map(async (statement) => {
-      const importDir = statement.path.startsWith('.') ? contractRoot : modulesRoot;
+      const importDir = statement.path.startsWith('.') ? srcRoot : modulesRoot;
       const relPath = path.join(importDir, statement.path);
 
       const { userDefinedTypeNames, interfaceName } = await loadContract({
@@ -225,7 +236,6 @@ const generateInterface = async (options) => {
         ...statement,
         importName: path.basename(statement.path, '.sol'),
         interfaceName,
-        importDir,
         relPath,
         isUsed,
       };
@@ -236,10 +246,10 @@ const generateInterface = async (options) => {
     imports
       .filter(({ interfaceName, isUsed }) => !!interfaceName && isUsed)
       .map(async (statement) => {
-        // ! should be generated from the same directory instead of node_modules for modules' interfaces
         const interface = await generateInterface({
           ...options,
           src: statement.relPath,
+          targetRoot,
         });
 
         return {
@@ -249,14 +259,11 @@ const generateInterface = async (options) => {
       }),
   );
 
-  const importRoot = path.join(contractRoot, targetRoot);
+  const importRoot = path.dirname(interfaceSrc);
   const importStubs = importedInterfaces
     .map(
       ({ interfaceSrc }) =>
-        `import "${interfaceSrc
-          .replace(modulesRoot, '')
-          .replace(importRoot, '.')
-          .replace(/^\//, '')}";\n`,
+        `import "${interfaceSrc.replace(importRoot, '.').replace(/^\//, '')}";\n`,
     )
     .join('');
 
@@ -281,7 +288,7 @@ const generateInterface = async (options) => {
     .concat(!onlyRawTypes ? structStubs : [], getterStubs, functionStubs)
     .join('\n\n');
 
-  const interface = `// SPDX-License-Identifier: ${license}
+  const interface = `${comments.join('\n')}
 pragma ${pragma.name} ${pragma.value};
 ${importStubs.length > 0 ? '\n' : ''}${importStubs}
 interface ${interfaceName}${inheritanceStub} {

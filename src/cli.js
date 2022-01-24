@@ -34,16 +34,9 @@ const optionDefinitions = [
   {
     name: 'targetRoot',
     type: String,
-    description:
-      "The path to the target interfaces directory, relative to the contract's directory.",
+    description: 'The path to the target interfaces directory, relative to the working directory.',
     typeLabel: '<path>',
-    defaultValue: 'interfaces',
-  },
-  {
-    name: 'license',
-    alias: 'l',
-    type: String,
-    description: "The SPDX license's identifier added to the start of each generated interface.",
+    defaultValue: undefined,
   },
   {
     name: 'logFiles',
