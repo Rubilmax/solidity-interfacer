@@ -46,6 +46,11 @@ const loadContract = async (options) => {
     const content = fs.readFileSync(src, 'utf-8');
     const { children } = parser.parse(content);
 
+    const licenses = content
+      .split('\n')
+      .filter((line) => line.replace(/^\s+|\s+$/g, '').startsWith('//'))
+      .flatMap((line) => line.match(/(?<=SPDX-License-Identifier: ).+/));
+
     const pragma = children.find(isStatement(STATEMENT_TYPE.PRAGMA_DIRECTIVE));
     if (!pragma) throw Error(`🟥 No pragma found at ${src}`);
 
@@ -69,6 +74,7 @@ const loadContract = async (options) => {
       userDefinedTypeNames,
       structs,
       structTypeNames,
+      license: options.license || licenses[0] || 'UNLICENSED',
     };
   }
 
@@ -76,7 +82,7 @@ const loadContract = async (options) => {
 };
 
 const generateInterface = async (options) => {
-  const { src, modulesRoot, targetRoot, license, logFiles, onlyRawTypes } = options;
+  const { src, modulesRoot, targetRoot, logFiles, onlyRawTypes } = options;
 
   if (src in lookUpContracts && lookUpContracts[src].interfaceSrc) return lookUpContracts[src];
 
@@ -88,6 +94,7 @@ const generateInterface = async (options) => {
     userDefinedTypeNames,
     structs,
     structTypeNames,
+    license,
   } = await loadContract(options);
 
   const interfaceSrc =
@@ -229,6 +236,7 @@ const generateInterface = async (options) => {
     imports
       .filter(({ interfaceName, isUsed }) => !!interfaceName && isUsed)
       .map(async (statement) => {
+        // ! should be generated from the same directory instead of node_modules for modules' interfaces
         const interface = await generateInterface({
           ...options,
           src: statement.relPath,
