@@ -72,16 +72,6 @@ const loadContract = async (options) => {
       ? (contract.kind !== 'interface' ? 'I' : '') + contract.name
       : '';
 
-    const isModule = src.startsWith(modulesRoot);
-    const interfaceSrc =
-      contract.kind === 'interface'
-        ? src
-        : path.join(
-            targetRoot,
-            isModule ? `dependencies/${src.split('/')[1]}` : '',
-            `${interfaceName}.sol`,
-          );
-
     lookUpContracts[src] = {
       interfaceName,
       children,
@@ -91,7 +81,6 @@ const loadContract = async (options) => {
       structs,
       structTypeNames,
       comments,
-      interfaceSrc,
       interfaceSrcs: [],
     };
   }
@@ -114,13 +103,10 @@ const generateInterface = async (options) => {
     structs,
     structTypeNames,
     comments,
-    interface,
-    interfaceSrc,
     interfaceSrcs,
   } = await loadContract(options);
 
-  if (!pragma || !contract || contract.kind === 'interface' || contract.kind === 'library')
-    return { ...lookUpContracts[src], interfaceSrc };
+  if (!pragma || !contract) return { ...lookUpContracts[src], interfaceSrc: src };
 
   const generatedInterfaceSrc = interfaceSrcs.find((interfaceSrc) =>
     interfaceSrc.startsWith(options.targetRoot),
@@ -128,8 +114,21 @@ const generateInterface = async (options) => {
   if (generatedInterfaceSrc)
     return { ...lookUpContracts[src], interfaceSrc: generatedInterfaceSrc };
 
+  const isModule = src.startsWith(modulesRoot);
+  const interfaceSrc =
+    contract.kind === 'interface'
+      ? src
+      : path.join(
+          options.targetRoot,
+          isModule ? `dependencies/${src.split('/')[1]}` : '',
+          `${interfaceName}.sol`,
+        );
+
+  if (contract.kind === 'interface' || contract.kind === 'library')
+    return { ...lookUpContracts[src], interfaceSrc };
+
   const importRoot = path.dirname(interfaceSrc);
-  if (!interface) {
+  if (!lookUpContracts[src].interface) {
     if (!logFiles) console.log(colors.yellow(`🖨️  Interfacing: ${colors.underline(src)}`));
 
     const parents = contract.baseContracts
