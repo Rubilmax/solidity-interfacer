@@ -2,7 +2,7 @@
   "name": "solidity-interfacer",
   "description": "🚀🖨️  Automatically generates your Solidity contracts' interfaces",
   "author": "Romain Milon <rmilon@gmail.com> (https://r.milon.pro)",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "bin": "./src/cli.js",
   "dependencies": {
     "@solidity-parser/parser": "^0.14.0",

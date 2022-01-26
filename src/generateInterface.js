@@ -32,13 +32,15 @@ const loadFakeContract = (src, logFiles) => {
     structs: [],
     structTypeNames: [],
     comments: [],
+    interfaceSrc: src,
+    interfaceSrcs: [],
   };
 
   return lookUpContracts[src];
 };
 
 const loadContract = async (options) => {
-  const { src, logFiles } = options;
+  const { src, modulesRoot, targetRoot, logFiles } = options;
 
   if (!(src in lookUpContracts)) {
     const exists = fs.existsSync(src);
@@ -70,6 +72,16 @@ const loadContract = async (options) => {
       ? (contract.kind !== 'interface' ? 'I' : '') + contract.name
       : '';
 
+    const isModule = src.startsWith(modulesRoot);
+    const interfaceSrc =
+      contract.kind === 'interface'
+        ? src
+        : path.join(
+            targetRoot,
+            isModule ? `dependencies/${src.split('/')[1]}` : '',
+            `${interfaceName}.sol`,
+          );
+
     lookUpContracts[src] = {
       interfaceName,
       children,
@@ -79,6 +91,8 @@ const loadContract = async (options) => {
       structs,
       structTypeNames,
       comments,
+      interfaceSrc,
+      interfaceSrcs: [],
     };
   }
 
@@ -89,19 +103,7 @@ const generateInterface = async (options) => {
   const { src, modulesRoot, logFiles, onlyRawTypes } = options;
 
   const srcRoot = path.dirname(src);
-  const targetRoot = options.targetRoot || path.join(srcRoot, 'interfaces');
-
-  if (src in lookUpContracts) {
-    const { interfaceSrcs } = lookUpContracts[src];
-
-    if (interfaceSrcs) {
-      const interfaceSrc = interfaceSrcs.find((interfaceSrc) =>
-        interfaceSrc.startsWith(targetRoot),
-      );
-
-      if (interfaceSrc) return { ...lookUpContracts[src], interfaceSrc };
-    }
-  }
+  options.targetRoot = options.targetRoot || path.join(srcRoot, 'interfaces');
 
   const {
     interfaceName,
@@ -112,27 +114,22 @@ const generateInterface = async (options) => {
     structs,
     structTypeNames,
     comments,
+    interface,
+    interfaceSrc,
+    interfaceSrcs,
   } = await loadContract(options);
-
-  const isModule = src.startsWith(modulesRoot);
-  const interfaceSrc =
-    contract.kind === 'interface'
-      ? src
-      : path.join(
-          targetRoot,
-          isModule ? `dependencies/${src.split('/')[1]}` : '',
-          `${interfaceName}.sol`,
-        );
-  const importRoot = path.dirname(interfaceSrc);
-
-  if (!lookUpContracts[src].interfaceSrcs)
-    Object.assign(lookUpContracts[src], { interfaceSrcs: [] });
-  lookUpContracts[src].interfaceSrcs.push(interfaceSrc);
 
   if (!pragma || !contract || contract.kind === 'interface' || contract.kind === 'library')
     return { ...lookUpContracts[src], interfaceSrc };
 
-  if (!(src in lookUpContracts) || !lookUpContracts[src].interface) {
+  const generatedInterfaceSrc = interfaceSrcs.find((interfaceSrc) =>
+    interfaceSrc.startsWith(options.targetRoot),
+  );
+  if (generatedInterfaceSrc)
+    return { ...lookUpContracts[src], interfaceSrc: generatedInterfaceSrc };
+
+  const importRoot = path.dirname(interfaceSrc);
+  if (!interface) {
     if (!logFiles) console.log(colors.yellow(`🖨️  Interfacing: ${colors.underline(src)}`));
 
     const parents = contract.baseContracts
@@ -266,7 +263,6 @@ const generateInterface = async (options) => {
           const interface = await generateInterface({
             ...options,
             src: statement.relPath,
-            targetRoot,
           });
 
           return {
@@ -313,6 +309,8 @@ ${stubs}
 }`,
     });
   }
+
+  lookUpContracts[src].interfaceSrcs.push(interfaceSrc);
 
   if (!fs.existsSync(importRoot)) fs.mkdirSync(importRoot, { recursive: true });
   await fs.writeFileSync(interfaceSrc, lookUpContracts[src].interface);
